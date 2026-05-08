@@ -118,22 +118,42 @@
         }
 
         function render() {
-            const container = document.getElementById('boardContainer');
-            const sorted = [...players].sort((a, b) => b.score - a.score || a.id - b.id);
-            container.innerHTML = sorted.map((p, i) => {
-                const rank = i + 1;
-                const isNew = Date.now() - p.lastUpdate < 3000;
-                let rS = rank === 1 ? "text-yellow-400 text-2xl" : rank === 2 ? "text-slate-300 text-xl" : rank === 3 ? "text-orange-400 text-xl" : "text-slate-500";
-                return `<div class="player-row ${isNew ? 'just-updated' : ''} bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex items-center gap-4">
-                    <div class="score-font font-bold w-10 text-center ${rS}">${rank}</div>
-                    <div class="flex-1"><div class="flex items-center gap-2">
-                        <span class="text-[10px] bg-slate-800 text-slate-400 px-2 rounded font-mono">ID:${p.id}</span>
-                        <input type="text" value="${p.name}" onchange="updateName(${p.id}, this.value)" class="bg-transparent border-b border-transparent focus:border-blue-500 focus:outline-none font-bold w-full">
-                    </div></div>
-                    <div class="text-right score-font text-2xl font-bold ${p.score < 0 ? 'text-red-400' : 'text-blue-400'}">${p.score.toLocaleString()}</div>
-                </div>`;
-            }).join('');
-        }
+    const container = document.getElementById('boardContainer');
+    if (players.length === 0) return;
+
+    // Sort: High score first, then by ID
+    const sorted = [...players].sort((a, b) => b.score - a.score || a.id - b.id);
+
+    container.innerHTML = sorted.map((p, index) => {
+        const rank = index + 1;
+        const isRecentlyUpdated = Date.now() - p.lastUpdate < 3000;
+        
+        let rankStyle = "text-slate-500";
+        if (rank === 1) rankStyle = "text-yellow-400 text-2xl";
+        else if (rank === 2) rankStyle = "text-slate-300 text-xl";
+        else if (rank === 3) rankStyle = "text-orange-400 text-xl";
+
+        return `
+            <div class="player-row ${isRecentlyUpdated ? 'just-updated' : ''} bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex items-center gap-4">
+                <div class="score-font font-bold w-10 text-center ${rankStyle}">${rank}</div>
+                
+                <div class="flex-1">
+                    <div class="flex items-center gap-2">
+                        <span class="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-mono">ID:${String(p.id).padStart(2, '0')}</span>
+                        
+                        <span class="font-bold text-slate-200 ml-1 select-none">${p.name}</span>
+                    </div>
+                </div>
+
+                <div class="text-right">
+                    <div class="score-font text-2xl font-bold ${p.score < 0 ? 'text-red-400' : 'text-blue-400'}">
+                        ${p.score.toLocaleString()}
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
 
         function resetAll() {
             if (confirm("確定重置所有人？")) {
