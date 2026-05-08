@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>26區生存之道 - 雲端雙向計分系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Noto+Sans+TC:wght@400;700&display=swap');
+        
+        :root {
+            --neon-blue: #00d2ff;
+            --neon-green: #00ff9d;
+            --dark-bg: #020617;
+        }
+
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: var(--dark-bg);
+            color: #f1f5f9;
+        }
+
+        .cyber-panel {
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 2px solid #334155;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        .player-row {
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .score-font {
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .input-focus:focus {
+            outline: none;
+            border-color: var(--neon-blue);
+            box-shadow: 0 0 10px rgba(0, 210, 255, 0.5);
+        }
+
+        @keyframes pulse-update {
+            0% { background-color: rgba(0, 210, 255, 0); }
+            50% { background-color: rgba(0, 210, 255, 0.2); }
+            100% { background-color: rgba(0, 210, 255, 0); }
+        }
+
+        .just-updated {
+            animation: pulse-update 1.5s ease;
+        }
+    </style>
+</head>
+<body class="pb-20">
+
+    <div class="sticky top-0 z-50 cyber-panel p-4 mb-6">
+        <div class="max-w-4xl mx-auto">
+            <div class="flex flex-col md:flex-row gap-4 items-center">
+                
+                <div class="flex flex-col w-full md:w-32">
+                    <label class="text-[10px] text-blue-400 font-bold mb-1 ml-1 uppercase tracking-wider">玩家編號</label>
+                    <input type="number" id="targetId" min="1" max="66" placeholder="1-66"
+                           class="bg-slate-900 border-2 border-slate-700 rounded-xl h-14 text-center text-2xl font-bold input-focus">
+                </div>
+
+                <div class="flex flex-col w-full md:w-40">
+                    <label class="text-[10px] text-green-400 font-bold mb-1 ml-1 uppercase tracking-wider">調整數值</label>
+                    <input type="number" id="customVal" placeholder="加/減"
+                           class="bg-slate-900 border-2 border-slate-700 rounded-xl h-14 text-center text-xl font-bold input-focus">
+                </div>
+
+                <div class="grid grid-cols-4 gap-2 w-full md:flex-1">
+                    <button onclick="applyScore(100)" class="h-14 bg-slate-800 hover:bg-slate-700 rounded-xl font-bold border border-slate-600 transition">+100</button>
+                    <button onclick="applyScore(500)" class="h-14 bg-slate-800 hover:bg-slate-700 rounded-xl font-bold border border-slate-600 transition">+500</button>
+                    <button onclick="applyCustom()" class="h-14 col-span-2 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold shadow-lg shadow-blue-900/20 transition text-lg">
+                        執行調整
+                    </button>
+                </div>
+
+            </div>
+            
+            <div id="msgLog" class="text-center text-xs mt-3 h-4 font-medium text-slate-400 transition-all opacity-0"></div>
+        </div>
+    </div>
+
+    <div class="max-w-4xl mx-auto px-4">
+        <div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+            <h2 class="text-xl font-bold flex items-center gap-2">
+                <span class="flex h-3 w-3 rounded-full bg-green-500 animate-pulse"></span>
+                即時生存排行榜 (雙向同步中)
+            </h2>
+            <div class="flex flex-wrap gap-4 text-xs font-bold">
+                <button onclick="loadFromGoogleSheet()" class="text-yellow-400 hover:text-yellow-300 transition uppercase border border-yellow-400/30 px-2 py-1 rounded">📥 從表格讀取</button>
+                <button onclick="syncToGoogleSheet()" class="text-green-400 hover:text-green-300 transition uppercase border border-green-400/30 px-2 py-1 rounded">📤 同步至表格</button>
+                <button onclick="exportCSV()" class="text-blue-400 hover:underline">導出 CSV</button>
+                <button onclick="resetAll()" class="text-red-500 hover:underline">重置</button>
+            </div>
+        </div>
+
+        <div id="boardContainer" class="space-y-3">
+            <div class="text-center py-10 text-slate-500 italic">正在初始化數據...</div>
+        </div>
+    </div>
+
+    <script>
+        // --- 設定區 ---
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz04XrY8ic07ToJPmUn_1rLCAobkTwD9_iWXG_51WhqEj_r2eDsAan8ns21H5_aI6lW/exec"; 
+
+        let players = JSON.parse(localStorage.getItem('evade_v3_data')) || 
+                      Array.from({ length: 66 }, (_, i) => ({
+                          id: i + 1,
+                          name: `玩家 ${String(i + 1).padStart(2, '0')}`,
+                          score: 0,
+                          lastUpdate: 0
+                      }));
+
+        // --- 核心邏輯 ---
+
+        function save() {
+            localStorage.setItem('evade_v3_data', JSON.stringify(players));
+            // 每次改動自動上傳 (可選：若想手動上傳可註解掉下面這行)
+            syncToGoogleSheet(); 
+        }
+
+        // 📤 推送數據到 Google Sheet
+        async function syncToGoogleSheet() {
+            if (!SCRIPT_URL || SCRIPT_URL.includes("YOUR_GOOGLE")) {
+                notify("⚠️ 尚未設定 Google Script URL", true);
+                return;
+            }
+            const sorted = [...players].sort((a, b) => b.score - a.score || a.id - b.id);
+            try {
+                await fetch(SCRIPT_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(sorted)
+                });
+                notify("☁️ 數據已成功推送到雲端表格");
+            } catch (e) {
+                notify("❌ 同步失敗", true);
+            }
+        }
+
+        // 📥 從 Google Sheet 抓取數據
+        async function loadFromGoogleSheet() {
+            if (!SCRIPT_URL || SCRIPT_URL.includes("YOUR_GOOGLE")) return;
+            notify("⏳ 正在從雲端讀取最新數據...");
+            try {
+                const response = await fetch(SCRIPT_URL);
+                const cloudData = await response.json();
+                if (cloudData && cloudData.length > 0) {
+                    players = cloudData;
+                    localStorage.setItem('evade_v3_data', JSON.stringify(players));
+                    render();
+                    notify("✅ 雲端數據載入成功！");
+                }
+            } catch (e) {
+                console.error(e);
+                notify("❌ 讀取雲端失敗，請確認腳本已發布", true);
+            }
+        }
+
+        function notify(text, isError = false) {
+            const log = document.getElementById('msgLog');
+            log.innerText = text;
+            log.className = `text-center text-xs mt-3 h-4 font-medium transition-all opacity-100 ${isError ? 'text-red-400' : 'text-blue-400'}`;
+            setTimeout(() => log.classList.add('opacity-0'), 3000);
+        }
+
+        function applyScore(val) {
+            const idBox = document.getElementById('targetId');
+            const id = parseInt(idBox.value);
+            if (!id || id < 1 || id > 66) {
+                notify("請輸入 1-66 之間的玩家編號", true);
+                idBox.focus();
+                return;
+            }
+            const player = players.find(p => p.id === id);
+            if (player) {
+                player.score += val;
+                player.lastUpdate = Date.now();
+                save();
+                render();
+                notify(`✅ ${player.name} 分數更新為 ${player.score}`);
+                idBox.select();
+            }
+        }
+
+        function applyCustom() {
+            const customValBox = document.getElementById('customVal');
+            const val = parseInt(customValBox.value);
+            if (isNaN(val)) {
+                notify("請輸入有效調整數值", true);
+                customValBox.focus();
+                return;
+            }
+            applyScore(val);
+            customValBox.value = "";
+        }
+
+        function updateName(id, newName) {
+            const player = players.find(p => p.id === id);
+            if (player) {
+                player.name = newName;
+                save();
+            }
+        }
+
+        function render() {
+            const container = document.getElementById('boardContainer');
+            // 排序規則：分數最高優先，同分則 ID 小的優先
+            const sorted = [...players].sort((a, b) => b.score - a.score || a.id - b.id);
+
+            container.innerHTML = sorted.map((p, index) => {
+                const rank = index + 1;
+                const isRecentlyUpdated = Date.now() - p.lastUpdate < 2000;
+                
+                let rankStyle = "text-slate-500";
+                let borderStyle = "border-slate-800";
+                if (rank === 1) { rankStyle = "text-yellow-400 text-2xl"; borderStyle = "border-yellow-500/50 bg-yellow-500/5"; }
+                else if (rank === 2) { rankStyle = "text-slate-300 text-xl"; borderStyle = "border-slate-400/50 bg-slate-400/5"; }
+                else if (rank === 3) { rankStyle = "text-orange-400 text-xl"; borderStyle = "border-orange-500/50 bg-orange-500/5"; }
+
+                return `
+                    <div class="player-row ${isRecentlyUpdated ? 'just-updated' : ''} bg-slate-900/40 border ${borderStyle} rounded-2xl p-4 flex items-center gap-4">
+                        <div class="score-font font-bold w-10 text-center ${rankStyle}">
+                            ${rank}
+                        </div>
+                        <div class="flex-1">
+                            <div class="flex items-center gap-2">
+                                <span class="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-mono">ID:${String(p.id).padStart(2, '0')}</span>
+                                <input type="text" value="${p.name}" onchange="updateName(${p.id}, this.value)" 
+                                       class="bg-transparent border-b border-transparent focus:border-blue-500 focus:outline-none font-bold w-full transition-all">
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="score-font text-2xl font-bold ${p.score < 0 ? 'text-red-400' : 'text-blue-400'}">
+                                ${p.score.toLocaleString()}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function resetAll() {
+            if (confirm("🚨 注意：這將清空所有分數並重置為 0，且會同步至雲端。確定嗎？")) {
+                players.forEach(p => { p.score = 0; p.lastUpdate = 0; });
+                save();
+                render();
+                notify("數據已重置");
+            }
+        }
+
+        function exportCSV() {
+            let csv = "排名,ID,姓名,分數\n";
+            const sorted = [...players].sort((a, b) => b.score - a.score || a.id - b.id);
+            sorted.forEach((p, i) => {
+                csv += `${i+1},${p.id},${p.name},${p.score}\n`;
+            });
+            const blob = new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `生存榜_${new Date().toLocaleDateString()}.csv`;
+            a.click();
+        }
+
+        // 初始化載入
+        window.onload = () => {
+            render();
+            // 如果 URL 已設定，啟動時自動從雲端同步一次
+            if (SCRIPT_URL && !SCRIPT_URL.includes("YOUR_GOOGLE")) {
+                loadFromGoogleSheet();
+            }
+        };
+
+        // 鍵盤快捷鍵
+        document.getElementById('targetId').addEventListener('keypress', e => {
+            if (e.key === 'Enter') applyScore(100);
+        });
+        document.getElementById('customVal').addEventListener('keypress', e => {
+            if (e.key === 'Enter') applyCustom();
+        });
+    </script>
+</body>
+</html>
