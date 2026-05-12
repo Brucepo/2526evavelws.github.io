@@ -155,11 +155,33 @@
             }).join('');
         }
 
-        function resetAll() {
-            if (confirm("確定重置所有人？")) {
-                players.forEach(p => { p.score = 0; p.lastUpdate = Date.now(); syncPlayer(p); });
-                console.log(p+" marks had reset to 0");
-                render();
+        async function resetAll() {
+            // 1. Filter players who actually have a score to clear
+            const playersToReset = players.filter(p => p.score !== 0);
+
+            if (playersToReset.length === 0) {
+                alert("所有玩家的分數已經是 0 了，無需重置。");
+                return;
+            }
+
+            if (confirm(`確定重置這 ${playersToReset.length} 位玩家的分數嗎？`)) {
+                
+                // 2. Sort them by ID (Ascending S01-S66)
+                playersToReset.sort((a, b) => a.id.localeCompare(b.id));
+
+                // 3. Process only the players who need it
+                for (const p of playersToReset) {
+                    console.log(`正在重置: ${p.id}...`);
+                    p.score = 0;
+                    p.lastUpdate = Date.now();
+                    
+                    // Wait for each sync to finish before moving to the next
+                    // This prevents the "Race Condition" we discussed earlier
+                    await syncPlayer(p); 
+                }
+
+                console.log("重置程序完成。");
+                render(); // Refresh the UI
             }
         }
 
